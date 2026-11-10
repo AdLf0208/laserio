@@ -1,0 +1,11 @@
+{
+  "title": "LaserIO",
+  "icon": "laserio:laser_node",
+  "items": [
+    "laserio:laser_node",
+    "laserio:laser_connector",
+    "laserio:card_item",
+    "laserio:logic_chip",
+    "laserio:logic_chip_raw"
+  ]
+}

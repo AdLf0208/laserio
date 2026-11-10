@@ -1,0 +1,49 @@
+id = "laserio"
+kind = "native-mod"
+name = "laserio"
+summary = "A Horizon port of laserio."
+description = """
+A port of [laserio](Direwolf20-MC/LaserIO) for Horizon.
+
+**Implemented so far**
+
+- The node.** `laserio:laser_node` (template `minecraft:stone`, hardness 2.0
+- from upstream's `strength(2.0f)`, no occlusion, 3/16–13/16 outline, the
+- carried Blockbench model and its two-frame animated texture). A placed node
+- gets a block entity that saves **one card per side**, encoded as
+- `Card::saved`.
+- The connector.** `laserio:laser_connector` (its carried model and state
+- rotations) with a `facing` state; the connector's inventory is the container
+- on its `facing` side. It joins the node's network when it touches it.
+
+**Not yet ported**
+
+- Implemented: the node, connector and item card blocks/items with carried
+- content; per-side cards saved in the block entity; the contiguous-block
+- network; EXTRACT → network insertion (node INSERT cards and a connector's
+- `facing` container); the 20-tick / 1-item operation with a configurable amount;
+- right-click card placement; `/laserio info|card|remove|mode|rate|face`;
+- persistence across a relaunch.
+- Not implemented (planned slices):
+- Energy, fluid and chemical cards** (block-to-block FE works at the pin via
+
+Original copyright and licence notices are kept in this repository. Pinned to
+Horizon 1d63e0a and horizon-mixins 5a64af93. Help with the remaining slices is
+welcome.
+"""
+authors = ["AdLf0208"]
+owners = ["AdLf0208"]
+owner_ids = [107615167]
+license = "MIT"
+source = "https://github.com/AdLf0208/laserio"
+icon = "icons/laserio.png"
+categories = ["utility"]
+tags = ["port", "horizon"]
+
+[[versions]]
+version = "0.1.0"
+published = "2026-11-10"
+game = "26.3"
+file = "laserio.hnmod"
+sha256 = "eff433749b8a4ba2a0fd29ba09e4e715eab0141fb12a72c9bc8c912988fccd53"
+changelog = "First release"

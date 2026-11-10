@@ -1,0 +1,13 @@
+# Port-owned content mod for the LaserIO 1.9.11 slice: the laser node, the laser
+# connector and the item card, their models, textures, lang, recipes and loot.
+# Models, textures and recipes are upstream's own MIT assets, carried from the
+# exact ATM10 jar (see ../../_shared/carry-work/laserio/SOURCE.md). The card and
+# transfer behaviour is the native half in ports/laserio/mixins.
+id = "laserio"
+name = "LaserIO"
+version = "1.9.11"
+description = "Laser nodes and connectors moving items on a channel (slice 1)."
+authors = ["Direwolf20", "ErrorMikey"]
+api = "0.2"
+side = "both"
+capabilities = ["registries"]

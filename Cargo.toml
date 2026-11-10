@@ -1,0 +1,17 @@
+[package]
+# Ported from: LaserIO 1.9.11 (Direwolf20-MC/LaserIO, MIT), Minecraft Java
+# 1.21.1 NeoForge. Local-only until the maintainer approves publishing.
+name = "horizon-laserio"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+description = "LaserIO for Horizon: a laser node and connector moving items on a channel"
+
+[lib]
+# This exact source is also injected as a same-crate module by horizon-mixins.
+path = "mixins/laserio/runtime.rs"
+
+[workspace]
+members = ["tools/audit"]
+resolver = "2"

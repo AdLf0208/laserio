@@ -1,0 +1,104 @@
+[mod]
+id = "laserio"
+version = "0.1.0"
+priority = 100
+
+[compatibility]
+horizon_revision = "1d63e0a5a37a7a708eb0b32b49bf0dfeb28ed8a9"
+
+# The pure card/network logic (standalone crate lib, injected as
+# `crate::game::laserio`): transfer mode, channel and amount, cards per side,
+# the 20-tick/one-item operation and the destination order.
+[[module]]
+id = "runtime"
+file = "crates/horizon-client/src/game.rs"
+name = "laserio"
+source = "runtime.rs"
+
+# Game-side glue: the node's and connector's block entities, network discovery,
+# the insert endpoints, the right-click card placement and `/laserio`.
+[[module]]
+id = "state"
+file = "crates/horizon-client/src/game.rs"
+name = "laserio_state"
+source = "support.rs"
+
+# The content half is inside this bundle (`data/laserio-content.hmod`, the built
+# `content/laserio.hmod`): this writes it to `.horizon-cache/` and appends it to
+# the dev-mod list, so one `.hnmod` installs the blocks, the items and the code.
+# The registry keeps one file per project, so a split port could not be listed;
+# AE2 ships the same pattern.
+[[injection]]
+id = "embedded-content"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client::game::mods::content_root"
+helper = "embedded_content.rs"
+bindings = [
+  { name = "root", ty = "&std::path::Path", value = "root" },
+  { name = "enabled", ty = "&std::collections::BTreeSet<String>", value = "enabled" },
+  { name = "dev", ty = "&[std::path::PathBuf]", value = "dev" },
+]
+
+# A placed laser node or connector gets a block entity (the node saves its
+# per-side cards there).
+[[injection]]
+id = "block-entity"
+hook = "block_entity"
+hook_version = 1
+kind = "HEAD"
+helper = "block_entity.rs"
+bindings = [
+  { name = "block", ty = "&str", value = "block" },
+  { name = "entity", ty = "&mut Option<(String, horizon_world::nbt::Compound)>", value = "entity" },
+]
+
+# After the level's tick: run every extract card's operation.
+[[injection]]
+id = "level-tick-post"
+hook = "level_tick_post"
+hook_version = 1
+kind = "HEAD"
+helper = "level_tick.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "dimension", ty = "&str", value = "dimension" },
+]
+
+# Right-clicking a node with an item card places it on the clicked side.
+[[injection]]
+id = "right-click-block"
+hook = "right_click_block"
+hook_version = 1
+kind = "HEAD"
+helper = "right_click.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "pos", ty = "[i32; 3]", value = "pos" },
+  { name = "face", ty = "[i32; 3]", value = "face" },
+  { name = "canceled", ty = "&mut bool", value = "canceled" },
+]
+
+# `/laserio info|card|remove|mode|rate|face`.
+[[injection]]
+id = "register-commands"
+hook = "register_commands"
+hook_version = 1
+kind = "HEAD"
+helper = "register.rs"
+bindings = [
+  { name = "commands", ty = "&mut Vec<NativeCommand>", value = "commands" },
+]
+
+[[injection]]
+id = "perform-command"
+hook = "perform_command"
+hook_version = 1
+kind = "HEAD"
+helper = "perform.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "player", ty = "&NativeServerPlayer", value = "player" },
+  { name = "command", ty = "&str", value = "command" },
+  { name = "ran", ty = "&mut bool", value = "ran" },
+]
