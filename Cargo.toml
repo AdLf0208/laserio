@@ -1,0 +1,20 @@
+[package]
+# Port of LaserIO 1.9.11 (Direwolf20-MC/LaserIO, commit
+# 4d278a6351a434d343fbf70d942baeeaf2607536, MIT). Minecraft Java 1.21.1
+# NeoForge; the port targets Horizon 26.3 at the pin in horizon-mod.toml.
+# Clean-room Rust rewrite from the mod's behaviour (FINDINGS.md); local-only
+# until publishing is approved, publishable under MIT with this source.
+#
+# Cargo's name and version are not the mod's identity: horizon-mod.toml is.
+name = "laserio"
+version = "0.2.0"
+edition = "2024"
+license = "MIT"
+description = "LaserIO for Horizon: laser nodes and connectors moving items on a channel"
+publish = false
+
+[dependencies]
+# The pinned SDK's API crate, fetched into .horizon/sdk/ by any `cargo horizon-mod` command (the
+# launcher builds against its own copy of the same build). Any other registry dependency must be
+# pinned with `horizon-launcher native-lock .` before building.
+horizon-mod-api = { path = ".horizon/sdk/api/crates/horizon-mod-api" }

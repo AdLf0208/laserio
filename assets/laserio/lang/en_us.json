@@ -1,0 +1,8 @@
+{
+  "block.laserio.laser_node": "Laser Node",
+  "block.laserio.laser_connector": "Laser Connector",
+  "item.laserio.card_item": "Item Card",
+  "item.laserio.logic_chip": "Logic Chip",
+  "item.laserio.logic_chip_raw": "Raw Logic Chip",
+  "itemGroup.laserio": "LaserIO"
+}
