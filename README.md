@@ -1,51 +1,68 @@
-# LaserIO → Horizon (slice 1, the SDK package)
+# LaserIO — a Horizon port
 
-A Horizon port of **LaserIO 1.9.11** (`Direwolf20-MC/LaserIO`, **MIT**), from the
-exact ATM10 pack jar `laserio-1.9.11.jar` (SHA-256 `03e8537d…9ef4df`, kept at
-`../_shared/licence-cache/`).
+**LaserIO** is a Minecraft mod. Can't have DireWire without Wires!. This repository is a **port of it to [Horizon](https://github.com/horizon-rust/horizon)**, the Rust engine for Minecraft Java 26.3. It carries the complete source of the port plus the content files it ships, and installs as a single `.hmod` package.
 
-**Slice 1:** the `laser_node` block with one item card per side, a
-`laser_connector` in the node's network, and the container the connector or an
-insert card faces. One item type moves per operation at upstream's default rate
-(one item every 20 ticks); `/laserio rate` raises the amount to 64. Energy and
-fluid cards, channels, filters, stockers, sensors, overclockers, the node menu and
-the wrench are later slices (see `notes.md`).
+Upstream: [Direwolf20-MC/LaserIO](https://github.com/Direwolf20-MC/LaserIO) — licence **MIT**.
 
-## Layout (one flat `.hmod`, the SDK format of 2026-11-18)
-
-| Path | What |
+| | |
 |---|---|
-| `horizon-mod.toml` | the only manifest and the only identity (`id`, `version`, `api`, `side`, `[native]` pins) |
-| `Cargo.toml` | one crate; its only dependency is `horizon-mod-api` from `.horizon/sdk/` |
-| `src/lib.rs` | the one `#[mod_api::horizon_mod] impl Hooks` |
-| `src/laser.rs` | game glue: the node part, the tick queue, the network pass, the card placement, `/laserio` |
-| `src/runtime.rs` | the pure card/network rules and their tests — **byte-identical** to 0.1.0, do not edit |
-| `assets/laserio/`, `data/laserio/` | the carried content: node, connector, cards, models, textures, lang, recipes, loot |
-| `laserio.hmod` | **the delivered package** — content and code in one file |
-| `tools/e2e.sh` | the in-game scenario (needs a launcher-built game) |
-| `FINDINGS.md` | what the jar and upstream do, and what this slice implements |
-| `notes.md`, `VALIDATION.md` | the port record and the ladder evidence |
+| Upstream mod | LaserIO ([source](https://github.com/Direwolf20-MC/LaserIO)) |
+| Ported to | Horizon 0b14f8a, Minecraft Java 26.3, mod API `0.2` |
+| Package | `laserio.hmod` (install it with the Horizon launcher) |
+| Licence | **MIT** — the upstream mod's licence; see [Licence and credit](#licence-and-credit) |
 
-## Commands
+## What this port implements
 
-```sh
-# pure runtime (the 10 tests)
-ports/tools/build-slot.sh run --job lio-test --port ports/laserio --step test -- \
-    bash -c 'cd ports/laserio && cargo test'
+- **The node.** `laserio:laser_node` (template `minecraft:stone`, hardness 2.0
+- **The connector.** `laserio:laser_connector` (its carried model and state
+- **The card.** `laserio:card_item` (the carried card texture with the insert
+- **The transfer.** After the level's tick, each EXTRACT card whose 20-tick
+- **The rate.** Upstream's defaults with no upgrades: **one item every 20
+- **The readout.** `/laserio info <x> <y> <z>` prints the cards (side, mode,
+- **Containers are the `ITEMS` capability**, not `native_container_slots`/`native_move_items`:
+- **One transaction per network per tick.** A card's move is: extract from the source slot, insert
 
-# lints and formatting of *this* crate (never `cargo fmt --all`: it formats the SDK)
-ports/tools/build-slot.sh run --job lio-lint --port ports/laserio --step lint -- \
-    bash -c 'cd ports/laserio && cargo clippy --all-targets -- -D warnings'
+## Not yet ported
 
-# the package (no Cargo.lock: a packed lock changes the artifact) and its checks
-ports/tools/build-slot.sh run --job lio-pack --port ports/laserio --step build -- \
-    bash -c 'cd ports/laserio && rm -f Cargo.lock && cargo horizon-mod build &&
-             cp target/horizon-mod/laserio.hmod ./laserio.hmod &&
-             cargo horizon-mod check laserio.hmod && cargo horizon-mod fits laserio.hmod --build nightly'
+- **Energy, fluid and chemical cards** (block-to-block FE works at the pin via
+- **Channels as routing**: a card's channel is stored and printed but not yet
+- **Filters** (basic/count/mod/NBT/tag) and the count/stock behaviours.
+- **Stockers, sensors, redstone cards**, the redstone modes and channels.
+- **Overclockers** (card and node): more cards per side and a faster cadence.
+- **The node/card menus and screens**, and the advanced connector pairing.
+- **The wrench** (linking by hand, connection removal, the colour/particles).
+- **Item-flow particles** (upstream's laser beam), the GUI/button/book assets,
 
-# the in-game check (a launcher-built game carries the mod: no --dev-mod)
-GAME=<launcher-built horizon-client> tools/e2e.sh
+## Installing
+
+1. Install the [Horizon launcher](https://github.com/horizon-rust/horizon/releases) (0.2.70 or newer).
+2. Add `laserio.hmod` to the instance's mods.
+3. The package is pinned to a specific Horizon build; the launcher checks that pin.
+
+## Licence and credit
+
+LaserIO was created by its upstream authors; the code, models and assets in the original mod
+remain theirs and are used here under **MIT**. The Rust in this repository is a clean-room
+rewrite for Horizon, not a translation of the original source.
+
+- `LICENSE` — the upstream licence text.
+- `LICENSE-NOTICE.md` — what this port carries and where it came from.
+- The upstream project: https://github.com/Direwolf20-MC/LaserIO
+
+## Technical details
+
+```
+horizon-mod.toml   package manifest (id, version, api, [native] pin)
+Cargo.toml         the crate; depends on `horizon-mod-api` from the fetched SDK
+src/               lib.rs (the one `impl Hooks`), runtime.rs (pure logic + tests), glue
+assets/ data/      the content the package ships
+tools/             content generators and the e2e scenario
 ```
 
-Local-only until the maintainer approves publishing (ARCHITECTURE.md §8); MIT
-allows derivatives and redistributing this port with its licence and source.
+- Build: `cargo horizon-mod build` (packages; it does not compile against the game).
+- Test: `cargo test`, `cargo clippy --all-targets -- -D warnings`.
+- In-game: `ports/tools/launcher-game.sh run laserio` in the campaign tree, or install the
+  `.hmod` and play; the harness scenario is `tools/e2e.sh`.
+
+This repository is generated from the campaign's port at `ports/laserio/`; the port's own
+`notes.md` is the full record (decisions, traps, evidence).
