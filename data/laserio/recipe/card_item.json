@@ -3,21 +3,11 @@
   "category": "misc",
   "group": "laserio",
   "key": {
-    "g": {
-      "tag": "c:nuggets/gold"
-    },
-    "l": {
-      "tag": "c:gems/lapis"
-    },
-    "p": {
-      "item": "laserio:logic_chip"
-    },
-    "q": {
-      "tag": "c:gems/quartz"
-    },
-    "r": {
-      "tag": "c:dusts/redstone"
-    }
+    "g": "#c:nuggets/gold",
+    "l": "#c:gems/lapis",
+    "p": "laserio:logic_chip",
+    "q": "#c:gems/quartz",
+    "r": "#c:dusts/redstone"
   },
   "pattern": [
     "rlr",

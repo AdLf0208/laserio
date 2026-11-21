@@ -1,10 +1,41 @@
-# VALIDATION — laserio (0.1.0 `.hnmod` history; the 0.2.0 SDK ladder is in `notes.md` §6)
+# VALIDATION — laserio (0.2.2 at pin `0a875da`; earlier ladders at the end)
 
-> **Current format: the SDK package (0.2.0).** Every step below belongs to the **retired**
-> `.hnmod` layout and its old pin; the 0.2.0 ladder — `cargo test` (10 passed), `clippy`
-> (0 warnings), `fmt --check`, `cargo horizon-mod build` → `laserio.hmod` 46,244 B sha256
-> `c84be8b8…870f`, `check` / `fits` EXIT 0, reproducible and fresh-clone identical — is recorded in
-> [`notes.md`](notes.md) §6, with its logs in `ports/_shared/evidence/laserio/sdk-*.log`.
+> **Current:** 0.2.2 at Horizon `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da909…`.
+> The 0.2.2 ladder and in-game legs are in
+> [`notes.md` § Slice 2](notes.md#slice-2--channels-route-and-the-carried-content-works-022-2026-11-21);
+> the logs are `ports/_shared/evidence/laserio/channel-*.log`, `sdk-test.log`, and
+> `ports/_shared/evidence/laserio-e2e/e2e-launcher*.log`.
+
+## Slice 2 — channels, carried recipes, loot (0.2.2, 2026-11-21)
+
+| Step | Evidence file | Result |
+|---|---|---|
+| runtime red | `evidence/laserio/channel-red.log` | exit 101, 33 errors: no `Destination`/`Service` |
+| runtime green | `evidence/laserio/channel-green.log`, `sdk-test.log` | **18 passed**, 0 failed |
+| counterfactual | `evidence/laserio/channel-counterfactual.log` | 2 failed with the channel filter reverted (`left: [1, 3, 2, 0]`, `channel 3 has no destination here`) |
+| fmt / clippy | `channel-fmt.log`, `channel-clippy.log` | `fmt_exit=0`, clippy exit 0, 0 warnings |
+| package | `channel-build-1.log`, `channel-build-2.log` | twice, `cmp` identical, **50,349 B**, sha256 `b6950475…0ef5`, 53 entries, no `Cargo.lock` |
+| check | `channel-check.log` | `laserio 0.2.2 (native-mod, format native-1/0a875da…/e59da90…, for 26.3)`, EXIT 0 |
+| fits (pin) | `channel-fits-pin.log` | `0a875da  made for`, EXIT 0 |
+| fits (another build) | `channel-fits-older.log` | `0b14f8a  fits`, EXIT 0 |
+| package gate | `python3 ports/tools/verify-sdk-package.py laserio` | 1/1 |
+| e2e main | `laserio-e2e/e2e-launcher.log` | `PASS` + `EXIT:0` (channels H/H2/H3, recipes R, loot L) |
+| e2e control | `laserio-e2e/e2e-launcher-control.log` | `FAIL: the laser node did not register` + `EXIT:1` |
+| selftest | `laserio-e2e/e2e-launcher-selftest.log` | `FAIL: SELFTEST: …` + `EXIT:1` |
+| selftest (channels) | `laserio-e2e/e2e-launcher-selftest-channels.log` | `FAIL: SELFTEST: the channel-0 card received nothing …` + `EXIT:1` |
+| log audit | `check-e2e-logs.py laserio-e2e --strict` | `logs=4 ok=4 missing-exit=0 bad-exit=0` |
+
+## 0.2.1 review fixes (2026-11-18)
+
+See `notes.md` § *Review fixes (2026-11-18)*: the destination-room rule (`runtime::movable`) and the
+spectator/`mayUseItemAt` gate on card installation, 13 tests, `PASS` + `EXIT:0`, control `EXIT:1`.
+
+## 0.2.0 — the SDK migration (2026-11-18)
+
+> Every step below belongs to the **retired** `.hnmod` layout and its old pin; the 0.2.0 ladder —
+> `cargo test` (10 passed), `clippy` (0 warnings), `fmt --check`, `cargo horizon-mod build` →
+> `laserio.hmod` 46,253 B sha256 `c84be8b8…870f`, `check` / `fits` EXIT 0, reproducible and
+> fresh-clone identical — is recorded in [`notes.md`](notes.md) §6, logs `evidence/laserio/sdk-*.log`.
 
 Pin **`1d63e0a5a37a7a708eb0b32b49bf0dfeb28ed8a9`**, mixins
 **`5a64af938ec86b00d53d16a408aabc0038fb3e57`** (schema 6). Every step ran

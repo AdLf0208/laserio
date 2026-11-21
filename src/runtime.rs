@@ -6,6 +6,9 @@
 // hands it to an INSERT card in the same channel, which inserts it into the
 // inventory on its side. With no upgrades those defaults are one item every 20
 // ticks, channel 0, and nothing is extracted when no destination accepts it.
+// A destination is an INSERT card on the extract card's own channel (0–15) or a
+// connector, which carries no card and relays for every channel; a channel no
+// destination serves extracts nothing.
 
 /// One of a node's six sides, in vanilla's `Direction.values()` order.
 pub type Face = usize;
@@ -150,9 +153,18 @@ impl Card {
     /// values the settings offer (`Card` never carries an invalid setting).
     pub fn with_extract(self, channel: i32, amount: i32) -> Self {
         Card {
-            channel: u8::try_from(channel.clamp(0, i32::from(MAX_CHANNEL))).unwrap_or(MAX_CHANNEL),
+            channel: clamp_channel(channel),
             amount: u32::try_from(amount.clamp(1, i32::try_from(MAX_AMOUNT).unwrap_or(i32::MAX)))
                 .unwrap_or(DEFAULT_AMOUNT),
+            ..self
+        }
+    }
+
+    /// The same card on another channel, keeping its mode and amount: the
+    /// routing setting upstream's card screen writes.
+    pub fn with_channel(self, channel: i32) -> Self {
+        Card {
+            channel: clamp_channel(channel),
             ..self
         }
     }
@@ -191,6 +203,12 @@ impl Default for Card {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// A channel setting clamped to the range upstream's card screen offers (`Card`
+/// never carries an invalid setting, whatever a command or a save says).
+fn clamp_channel(channel: i32) -> u8 {
+    u8::try_from(channel.clamp(0, i32::from(MAX_CHANNEL))).unwrap_or(MAX_CHANNEL)
 }
 
 /// The cards one node holds: upstream has nine slots per side; this slice keeps
@@ -250,6 +268,43 @@ pub struct Endpoint {
     pub face: Face,
 }
 
+/// Which extract cards a destination serves. Upstream matches an extract card to
+/// the insert cards of its **own channel**; a connector carries no card, so it
+/// relays for every channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Service {
+    /// A connector's side: it relays whatever reaches it.
+    AnyChannel,
+    /// A node's insert card: only the channel the card is set to.
+    Channel(u8),
+}
+
+impl Service {
+    /// Whether a card on `channel` may send into this destination.
+    pub const fn accepts(self, channel: u8) -> bool {
+        match self {
+            Self::AnyChannel => true,
+            Self::Channel(served) => served == channel,
+        }
+    }
+
+    /// The channel this destination serves, `None` for a relay.
+    pub const fn channel(self) -> Option<u8> {
+        match self {
+            Self::AnyChannel => None,
+            Self::Channel(served) => Some(served),
+        }
+    }
+}
+
+/// An [`Endpoint`] together with the cards it serves, which is what an operation
+/// asks before it moves anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Destination {
+    pub at: Endpoint,
+    pub service: Service,
+}
+
 /// A card's operation phase, from its block and side: it spreads a level's
 /// cards over the 20-tick cadence instead of moving them all on one tick
 /// (upstream ticks each card on its own `remainingSleep` counter, which a
@@ -266,14 +321,23 @@ pub fn is_operation_tick(game_time: u64, phase: u64) -> bool {
         .is_multiple_of(OPERATION_TICK_DELAY)
 }
 
-/// The order one operation tries the network's destinations in: block position
-/// then side, so the same network always gives the same order and the source
-/// endpoint is never a destination of itself.
-pub fn endpoint_order(endpoints: &[Endpoint], source: Endpoint) -> Vec<usize> {
-    let mut order: Vec<usize> = (0..endpoints.len())
-        .filter(|&index| endpoints[index] != source)
+/// The order one operation tries the destinations that serve `channel` in: block
+/// position then side, so the same network always gives the same order and the
+/// source endpoint is never a destination of itself. A destination on another
+/// channel is not asked at all — upstream hands an extract card's stack only to
+/// insert cards of its own channel, and an operation with no match extracts
+/// nothing.
+pub fn destination_order(
+    destinations: &[Destination],
+    source: Endpoint,
+    channel: u8,
+) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..destinations.len())
+        .filter(|&index| {
+            destinations[index].at != source && destinations[index].service.accepts(channel)
+        })
         .collect();
-    order.sort_by_key(|&index| endpoints[index]);
+    order.sort_by_key(|&index| destinations[index].at);
     order
 }
 
@@ -395,31 +459,124 @@ mod tests {
 
     #[test]
     fn destinations_are_deterministic_and_never_the_source() {
-        let endpoints = [
-            Endpoint {
-                laser: [9, 0, 0],
-                face: UP,
+        let at = |laser, face| Endpoint { laser, face };
+        let destinations = [
+            Destination {
+                at: at([9, 0, 0], UP),
+                service: Service::AnyChannel,
             },
-            Endpoint {
-                laser: [2, 0, 0],
-                face: WEST,
+            Destination {
+                at: at([2, 0, 0], WEST),
+                service: Service::AnyChannel,
             },
-            Endpoint {
-                laser: [2, 0, 0],
-                face: DOWN,
+            Destination {
+                at: at([2, 0, 0], DOWN),
+                service: Service::AnyChannel,
             },
-            Endpoint {
-                laser: [1, 0, 0],
-                face: WEST,
+            Destination {
+                at: at([1, 0, 0], WEST),
+                service: Service::AnyChannel,
             },
         ];
-        let source = endpoints[3];
-        assert_eq!(endpoint_order(&endpoints, source), vec![2, 1, 0]);
+        let source = at([1, 0, 0], WEST);
+        assert_eq!(destination_order(&destinations, source, 0), vec![2, 1, 0]);
         // The same network read in another order gives the same order.
-        let reversed = [endpoints[0], endpoints[1], endpoints[2], endpoints[3]];
-        assert_eq!(endpoint_order(&reversed, source), vec![2, 1, 0]);
+        let reversed = [
+            destinations[2],
+            destinations[0],
+            destinations[3],
+            destinations[1],
+        ];
+        assert_eq!(destination_order(&reversed, source, 0), vec![0, 3, 1]);
         // A lone endpoint is not its own destination.
-        assert!(endpoint_order(&[source], source).is_empty());
+        assert!(destination_order(&destinations[3..], source, 0).is_empty());
+    }
+
+    #[test]
+    fn an_insert_card_serves_only_its_own_channel() {
+        let served = Service::Channel(3);
+        assert_eq!(served.channel(), Some(3));
+        assert!(served.accepts(3));
+        assert!(!served.accepts(0));
+        assert!(!served.accepts(15));
+    }
+
+    #[test]
+    fn a_connector_relays_for_every_channel() {
+        assert_eq!(Service::AnyChannel.channel(), None);
+        for channel in 0..=MAX_CHANNEL {
+            assert!(Service::AnyChannel.accepts(channel), "channel {channel}");
+        }
+    }
+
+    #[test]
+    fn an_extract_card_reaches_only_the_destinations_on_its_channel() {
+        let at = |laser, face| Endpoint { laser, face };
+        let destinations = [
+            Destination {
+                at: at([9, 0, 0], NORTH),
+                service: Service::Channel(0),
+            },
+            Destination {
+                at: at([2, 0, 0], NORTH),
+                service: Service::Channel(3),
+            },
+            Destination {
+                at: at([4, 0, 0], EAST),
+                service: Service::AnyChannel,
+            },
+            Destination {
+                at: at([2, 0, 0], SOUTH),
+                service: Service::Channel(7),
+            },
+        ];
+        let source = at([1, 0, 0], WEST);
+        // Channel 3: its own card and the relay, nearest position first.
+        assert_eq!(destination_order(&destinations, source, 3), vec![1, 2]);
+        // Channel 7: that card and the relay.
+        assert_eq!(destination_order(&destinations, source, 7), vec![3, 2]);
+        // Channel 5: only the relay — no insert card serves channel 5.
+        assert_eq!(destination_order(&destinations, source, 5), vec![2]);
+        // Channel 0: the card on channel 0 answers, the one on 3 does not.
+        assert_eq!(destination_order(&destinations, source, 0), vec![2, 0]);
+    }
+
+    #[test]
+    fn an_extract_card_with_no_destination_on_its_channel_extracts_nothing() {
+        // Upstream matches an extract card to insert cards of the same channel and
+        // takes nothing when none answers; a mismatched destination is not asked.
+        let source = Endpoint {
+            laser: [1, 0, 0],
+            face: WEST,
+        };
+        let destinations = [Destination {
+            at: Endpoint {
+                laser: [9, 0, 0],
+                face: NORTH,
+            },
+            service: Service::Channel(0),
+        }];
+        let order = destination_order(&destinations, source, 3);
+        assert!(order.is_empty(), "channel 3 has no destination here");
+        assert_eq!(
+            spend_budget(4, &order, |_, _| unreachable!(
+                "a destination on another channel is never asked"
+            )),
+            0
+        );
+    }
+
+    #[test]
+    fn a_channel_is_clamped_and_the_rate_keeps_it() {
+        let card = Card::new().with_mode(TransferMode::Extract);
+        assert_eq!(card.with_channel(-1).channel(), 0);
+        assert_eq!(card.with_channel(99).channel(), MAX_CHANNEL);
+        assert_eq!(card.with_channel(3).channel(), 3);
+        // The rate keeps the channel, and the channel keeps the rate.
+        let routed = card.with_channel(3).with_extract(3, 8);
+        assert_eq!((routed.channel(), routed.amount()), (3, 8));
+        assert_eq!(routed.with_channel(5).amount(), 8);
+        assert_eq!(Card::from_saved(routed.saved()), routed);
     }
 
     #[test]

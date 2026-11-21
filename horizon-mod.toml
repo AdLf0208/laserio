@@ -1,10 +1,10 @@
 id = "laserio"
 name = "LaserIO"
-version = "0.2.0"
-description = """A port of LaserIO for Horizon: a laser node keeps one item card per side, and an
-extract card moves up to its amount out of the inventory on its side into the inventories its
-network reaches — a node's insert card sides and a laser connector's facing side — once every 20
-ticks, one item at a time at the shipped default. The node, the connector, the item card, their
+version = "0.2.2"
+description = """A port of LaserIO for Horizon: a laser node keeps one item card per side, an extract card
+moves up to its amount out of the inventory on its side every 20 ticks, and channels route it — it
+reaches only the insert cards on its own channel, while a laser connector relays for every channel;
+a channel no destination serves extracts nothing. The node, the connector, the item card, their
 models, textures, recipes and loot travel in this one package beside the code, so a single .hmod
 installs both halves."""
 authors = ["Direwolf20", "ErrorMikey", "AdLf0208"]
@@ -22,5 +22,5 @@ capabilities = ["registries"]
 
 [native]
 game = "26.3"
-horizon = "0b14f8acfd97fa2c750e42795249dcc981178ca4"
+horizon = "0a875da91dbb0fdcb7ba8c42c11341aa229af51a"
 mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"

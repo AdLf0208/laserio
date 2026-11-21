@@ -3,15 +3,9 @@
   "category": "misc",
   "group": "laserio",
   "key": {
-    "b": {
-      "item": "laserio:laser_connector"
-    },
-    "g": {
-      "tag": "c:glass_panes"
-    },
-    "i": {
-      "tag": "c:ingots/iron"
-    }
+    "b": "laserio:laser_connector",
+    "g": "#c:glass_panes",
+    "i": "#c:ingots/iron"
   },
   "pattern": [
     "igi",

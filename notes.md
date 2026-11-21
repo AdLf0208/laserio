@@ -1,5 +1,11 @@
 # LaserIO → Horizon — slice 1: one laser node moving items
 
+> **Current package: 0.2.2 (2026-11-21), pin `0a875da`.** Slice 2 added channel routing (an extract
+> card reaches only the insert cards on its channel) and repaired the carried recipes/tags, which
+> could not craft at 26.3 — see
+> [`## Slice 2`](#slice-2--channels-route-and-the-carried-content-works-022-2026-11-21). The rest of
+> this section is slice 1's record.
+
 **Format: the SDK package (2026-11-18), version 0.2.0.** This port was migrated from the retired
 `.hnmod` container to the flat SDK package — one `.hmod` carrying both the code (`src/`) and the
 content (`assets/`, `data/`). Former PR **#872** (the `.hnmod`) was closed by the 2026-11-18 format
@@ -55,10 +61,11 @@ No Java was copied or translated and the jar was not decompiled.
 - **The transfer.** After the level's tick, each EXTRACT card whose 20-tick
   operation falls on this tick (`game_time + x + y + z + side ≡ 0 mod 20`, the
   pin's substitute for a saved counter) takes the first item type the source
-  side offers and moves up to its amount into the network's inventories — a
-  node's INSERT card sides and a connector's `facing` side. **No destination
-  means no extraction**, and `native_move_items` puts a refused item back, so
-  nothing is lost to a full target.
+  side offers and moves up to its amount into the network's inventories **that
+  serve its channel** (slice 2) — a node's INSERT card sides on the same channel
+  and a connector's `facing` side, which relays for every channel. **No
+  destination means no extraction**, and `native_move_items` puts a refused item
+  back, so nothing is lost to a full target.
 - **The rate.** Upstream's defaults with no upgrades: **one item every 20
   ticks** (`CardItem.getItemExtractAmt` = 1, `BaseCard.getExtractSpeed` = 20).
   `/laserio rate <pos> <side> <n>` raises the amount to 64; a runtime test and
@@ -92,9 +99,10 @@ Not implemented (planned slices):
 
 1. **Energy, fluid and chemical cards** (block-to-block FE works at the pin via
    `native_move_energy`, API 142, so an energy card is a later slice).
-2. **Channels as routing**: a card's channel is stored and printed but not yet
+2. ~~**Channels as routing**: a card's channel is stored and printed but not yet
    used to match extract to insert; today every INSERT endpoint in the network
-   is a destination.
+   is a destination.~~ **Done in slice 2 (0.2.2)** — see
+   [`## Slice 2`](#slice-2--channels-route-and-the-carried-content-works-022-2026-11-21).
 3. **Filters** (basic/count/mod/NBT/tag) and the count/stock behaviours.
 4. **Stockers, sensors, redstone cards**, the redstone modes and channels.
 5. **Overclockers** (card and node): more cards per side and a faster cadence.
@@ -110,6 +118,225 @@ the placement click, which the pin's hooks do not expose as a block state); the
 node's `tintindex` core renders untinted (the pin has no block-colour provider).
 
 Skills: superpowers/using-superpowers,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port (slice 1b, packaging); slice 1 recorded superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
+## Slice 2 — channels route, and the carried content works (0.2.2, 2026-11-21)
+
+Pin **Horizon `0a875da91dbb0fdcb7ba8c42c11341aa229af51a`** + mixins
+`e59da9094f0c2fdda6c627fe9eff22dec6a906f0` (Nightly 2026-11-20, `package_format` 6, `content_api`
+0.2); the port's `[native]` block moved from `0b14f8a` to `0a875da` in this slice (no source edits
+were needed: the three hooks that gained a `dimension` argument upstream are ones this port does not
+implement).
+
+**Class + tier unchanged:** `content` / **`machines`** (`ports/ledger.csv`; the brief's
+"Choosing the slice" clause says `deep`, which contradicts its own Context block and the ledger — the
+ledger row is the authority and nothing in this slice leaves the machines shape: a block entity, the
+`ITEMS` capability and its own tick). The slice is additive on the same node/connector/card shape.
+
+### The slice and the gap it comes from
+
+Gap line, from `## Slice boundary and gaps` above:
+
+> 2. **Channels as routing**: a card's channel is stored and printed but not yet
+>    used to match extract to insert; today every INSERT endpoint in the network
+>    is a destination.
+
+Upstream's `ExtractorCardCache.extractItem` hands a stack only to **inserter cards with the same
+channel** (`FINDINGS.md`, "Extraction to insertion"), and takes nothing when none answers. The port
+stored and printed the channel but inserted into every endpoint, so the channel was decorative —
+the mod's central routing rule was missing. It fits `machines` exactly: no new block, no screen, no
+renderer, no entity; a pure rule (`runtime.rs`) plus the existing pass.
+
+- `runtime::Service` — what a destination serves: `Channel(u8)` for a node's insert card,
+  `AnyChannel` for a connector (it carries no card; upstream's relay is channel-agnostic).
+- `runtime::Destination` — an `Endpoint` plus its `Service`; `destination_order(&[…], source,
+  channel)` keeps only the destinations that serve the card's channel, sorted by position then side.
+- `Card::with_channel` (clamped 0–15) and `/laserio channel <pos> <side> <n>` (operator-only, like
+  `card`/`mode`/`rate`): the harness path, because this pin has no card screen.
+- The readout's target list now names each destination's channel
+  (`targets 52,100,0 north channel 3; 54,100,0 north channel 0`); a connector's relay still reads
+  as before (`targets 2,100,0 east`), so slice 1's assertions are unchanged.
+
+**Deviation, refined:** the connector inserts through its `facing` side (slice 1) *and* relays for
+every channel. Upstream a connector only relays, and the card at the far end decides; here the
+connector has no card, so treating its side as `AnyChannel` is the honest reading of the same
+deviation rather than inventing a channel for a block that has none.
+
+### Red → green
+
+**Red (the family does not exist yet)** — `cargo test`, 2026-11-21
+(`ports/_shared/evidence/laserio/channel-red.log`):
+
+```
+error[E0422]: cannot find struct, variant or union type `Destination` in this scope
+error[E0433]: cannot find type `Service` in this scope
+...
+error: could not compile `laserio` (lib test) due to 33 previous errors
+```
+
+**Green** — 18 tests (`channel-green.log`, `sdk-test.log`).
+
+**Counterfactual (the routing assertion can fail)** — with the channel filter temporarily reverted
+to `(true || …)` in `destination_order`, two tests failed
+(`channel-counterfactual.log`):
+
+```
+---- runtime::tests::an_extract_card_reaches_only_the_destinations_on_its_channel stdout ----
+thread '…' panicked at src/runtime.rs:535:9:
+assertion `left == right` failed
+  left: [1, 3, 2, 0]
+ right: [1, 2]
+
+---- runtime::tests::an_extract_card_with_no_destination_on_its_channel_extracts_nothing stdout ----
+thread '…' panicked at src/runtime.rs:560:9:
+channel 3 has no destination here
+```
+
+then restored and re-run green.
+
+### Carried-content repair (ruling 2026-11-20: a carried recipe that never crafts is dead data)
+
+Two defects were found from the artefact and fixed; both are recorded under
+[`## Upstream defects fixed (slice 2)`](#upstream-defects-fixed-slice-2) below. In short:
+
+- **All five carried recipes were in the 1.21.1 ingredient dialect** (`{"item": …}` / `{"tag": …}`,
+  object keys). Horizon 26.3 wants bare strings (`"minecraft:clay_ball"`, `"#c:ingots/iron"`) and a
+  string `ingredient`; the game's own loader said so on the first run that touched them:
+  `recipes: invalid ingredient (unresolved tag or malformed input): {"item":"minecraft:clay_ball"}`.
+  Rewritten in the 26.3 dialect with the same patterns/keys/results.
+- **The `c:` tags the recipes use were not declared anywhere** in the target's data
+  (`grep -rl 'nuggets/gold' …/26.3/data` finds nothing), so the recipes could not match even with the
+  right shape. The port now declares the seven tags it needs under `data/c/tags/item/`
+  (`nuggets/gold`, `gems/lapis`, `gems/quartz`, `dusts/redstone`, `ingots/iron`, `glass_blocks`,
+  `glass_panes`), the same repair `bhc` and others carry.
+- **Loot tables were already correct** and are now *proved*: both use the singular
+  `"condition": {"type":"minecraft:survives_explosion"}` form (26.3's shape; the plural
+  `"conditions": [...]` is what makes a block drop nothing, e.g. `enderio`'s conduit), and the leg
+  evaluates both tables in game.
+
+### Ladder (all through `ports/tools/build-slot.sh`, `CARGO_INCREMENTAL=0`)
+
+| Step | Command | Result |
+|---|---|---|
+| runtime red | `cargo test` | exit 101, 33 errors (no `Service`/`Destination`) — `channel-red.log` |
+| runtime green | `cargo test` | **18 passed**, 0 failed — `channel-green.log`, `sdk-test.log` |
+| counterfactual | `cargo test` with the filter reverted | 2 failed, quotes above — `channel-counterfactual.log` |
+| formatting | `cargo fmt --check` | `fmt_exit=0` — `channel-fmt.log` |
+| lints | `cargo clippy --all-targets -- -D warnings` | exit 0, **0 warnings** — `channel-clippy.log` |
+| package | `rm -f Cargo.lock; cargo horizon-mod build` twice | byte-identical (`cmp`), **50,349 B**, sha256 `b6950475…0ef5` — `channel-build-1.log`, `channel-build-2.log` |
+| registry check | `cargo horizon-mod check laserio.hmod` | `laserio 0.2.2 (native-mod, format native-1/0a875da…/e59da90…, for 26.3)`, **EXIT 0** — `channel-check.log` |
+| fits the pin | `cargo horizon-mod fits laserio.hmod --build 0a875da` | `0a875da  made for`, EXIT 0 — `channel-fits-pin.log` |
+| fits another build | `cargo horizon-mod fits laserio.hmod --build 0b14f8a` | `0b14f8a  fits`, EXIT 0 — `channel-fits-older.log` |
+| artifact | `unzip -l laserio.hmod` | **53 entries**, no `Cargo.lock` — `channel-artifact-entries.log` |
+| package gate | `python3 ports/tools/verify-sdk-package.py laserio` | **1/1** (package, packed `runtime.rs` identical, 18 tests, 0 clippy warnings, check, fits, skills) |
+
+**The two `fits` runs are on the delivered file** (`ports/laserio/laserio.hmod`, not
+`target/`): the pin build is the tautology (`made for`), the older build is the one that proves
+something (`fits`). A first pass ran `fits` against a stale 0.2.1 file at the port root and printed
+the two lines the wrong way round — the artifact was copied to the port root before the numbers above
+were taken.
+
+### In-game leg (launcher-built game at the pin)
+
+`ports/tools/launcher-game.sh build laserio`, then one lease per leg
+(`build-slot.sh run --step e2e -- bash ports/laserio/tools/e2e.sh`), evidence under
+`ports/_shared/evidence/laserio-e2e/`:
+
+| Leg | Result |
+|---|---|
+| main | `PASS:` + `EXIT:0` (phases A–G: transfer, rate, channels H/H2/H3, recipes R, loot L, relaunch, right-click, package) — `e2e-launcher.log` |
+| control (`GAME=$CONTROL_GAME`) | `FAIL: the laser node did not register: minecraft:air` + `EXIT:1` — `e2e-launcher-control.log` |
+| `SELFTEST=1` | `FAIL: SELFTEST: the target chest holds 10 stone, so the check is alive` + `EXIT:1` — `e2e-launcher-selftest.log` |
+| `SELFTEST_CHANNELS=1` | `FAIL: SELFTEST: the channel-0 card received nothing, so the routing check is alive` + `EXIT:1` — `e2e-launcher-selftest-channels.log` |
+| audit | `python3 ports/tools/check-e2e-logs.py laserio-e2e --strict` → `logs=4 ok=4 missing-exit=0 bad-exit=0` |
+
+The channel proof is two-way in one scenario: an extract card on channel 3 fills the insert card on
+channel 3 (20 of 20 stone) and leaves the channel-0 card at 0; then the channel-3 insert card moved
+to channel 5 makes the extract card **extract nothing at all** (source keeps its 20); then that card
+moved back to channel 3 receives all 20. `SELFTEST_CHANNELS=1` inverts the first claim and fails, so
+the routing assertion can fail.
+
+The recipe proof: four shaped recipes craft their declared id and count in a real crafting table and
+the grid is consumed (`logic_chip_raw` ×4, `laser_connector`, `laser_node`, `card_item`), the same
+connector ingredients in a pattern no recipe declares craft nothing, and the smelting recipe makes a
+logic chip in 100 ticks with the input consumed. The loot proof: `/loot give @s loot
+laserio:blocks/laser_node` answers `Dropped 1 [Laser Node]` for both tables, while a table that does
+not exist is refused (`Can't find element 'laserio:blocks/not_a_block'`), so the assertion is not
+vacuous.
+
+### Harness facts this slice cost
+
+- **`--headless` cannot answer `ctl screen`.** The recipe leg opens a crafting-table menu, and a
+  headless client has no screen: `screen` timed out (`{'error': "timed out waiting for the game's
+  reply"}`). The leg now launches **`--offscreen`** (`bhc` and `dimstorage` do the same for the same
+  reason); it still runs unattended and stays local.
+- **The recipe area must be inside the arena floor.** A table at x=58 was outside the `fill -8..44`
+  slab, so the tp'd player fell into the void and the click never reached the table
+  (`{'buttons': [], 'screen': 'playing'}`). The table/furnace now sit at x=40/42.
+- **The extract→insert move is one transaction, so a count can catch an item in neither chest.** The
+  A-phase total is now polled for the settled value (a real loss never comes back), instead of a
+  single sample.
+- **`/laserio rate` after the refill left a one-item residue**, so the last 4-item operation moved 3
+  and the per-step sample failed. The rate is now set *before* the refill, so the source is a
+  multiple of four. That 3-item step was **not** a port bug: upstream also moves the remainder.
+- The launcher **reuses a build while `horizon-mod.toml` is unchanged**, so after a data-only edit the
+  stale `versions/native-*` folder and its export were removed before rebuilding (the trap the
+  handover records).
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices
+
+## Upstream defects fixed (slice 2)
+
+**1. The carried recipes were in the 1.21.1 ingredient dialect — none of them could ever craft.**
+
+- *Evidence.* `data/laserio/recipe/card_item.json` (and the other four) used object ingredients:
+  `"g": {"tag": "c:nuggets/gold"}`, `"p": {"item": "laserio:logic_chip"}`, and the smelting file an
+  object `"ingredient": {"item": "laserio:logic_chip_raw"}`. The target's own vanilla recipes use bare
+  strings (`data/minecraft/recipe/stone_pickaxe.json`: `"X": "#minecraft:stone_tool_materials"`;
+  `iron_ingot_from_smelting_raw_iron.json`: `"ingredient": "minecraft:raw_iron"`), and the first
+  in-game run that loaded them logged, per ingredient:
+  `recipes: invalid ingredient (unresolved tag or malformed input): {"item":"minecraft:clay_ball"}` —
+  including `minecraft:clay_ball`, which is not a bad id, so the shape was the defect.
+- *Fix.* All five files rewritten to the 26.3 dialect (bare id / `#tag` keys, string `ingredient`,
+  `{"count", "id"}` result) with the same patterns, keys, counts and cooking time. **This is a carry
+  error, not an upstream defect: the Java mod is correct; the JSON this port carried from the 1.21.1
+  data was in the old dialect** — `xnet`, `mekanism` and `modularrouters` fixed the same class today.
+- *User-visible.* Before: a player could not craft a node, a connector, a card or a chip at all — the
+  recipe never matched, so it was dead data. Now all five craft.
+
+**2. The `c:` item tags the recipes name were not declared, so even the right shape could not match.**
+
+- *Evidence.* `grep -rl 'nuggets/gold' <26.3 resources>/data` → nothing; the target has no NeoForge
+  common tags. Upstream's recipes (and ATM10's ecosystem) use `c:nuggets/gold`, `c:gems/lapis`,
+  `c:gems/quartz`, `c:dusts/redstone`, `c:ingots/iron`, `c:glass_blocks`, `c:glass_panes`.
+- *Fix.* `data/c/tags/item/…` declares each of the seven against the vanilla item it means, the
+  campaign's "declare both so other mods can find it" rule; the recipes then name `#c:…` as upstream
+  does, so a pack that adds its own members to those tags keeps working.
+- *User-visible.* The recipes match the tags a modpack's other mods populate, not just vanilla.
+
+**Loot tables: no defect.** Both (`laserio:blocks/laser_node`, `…/laser_connector`) already carry the
+singular `"condition": {"type": "minecraft:survives_explosion"}` 26.3 shape; proven in game rather
+than assumed.
+
+**Worth an upstream report?** No — the Java mod is right; both defects are in what this port carried
+from the 1.21.1 data, so the repair stays here.
+
+### Coverage (family → proof)
+
+| Family | State |
+|---|---|
+| node / connector / card blocks and items | **tested** — placed and read back in A/F; control game knows neither id |
+| item transfer, 20-tick cadence, amount | **tested** — A (one per operation), A2 (four per operation after `rate`) |
+| channels as routing | **tested** — H (matching receives, mismatched does not), H2 (no destination → no extraction), H3 (matching again receives) |
+| card placement by right-click, persistence | **tested** — F, E (relaunch) |
+| `/laserio info` readout | **tested** — card/side/mode/channel/rate/targets asserted by parsed text |
+| carried shaped recipes (4) | **tested** — R, id + count + ingredients consumed |
+| carried smelting recipe (1) | **tested** — R, furnace, 100 ticks, input consumed |
+| carried loot tables (2) | **tested** — L, `/loot` yields the block; missing table refused |
+| energy / fluid / chemical cards | **not ported** — gap 1 (needs an energy-capable block for a leg; `native_move_energy` exists) |
+| filters (basic/count/mod/NBT/tag) | **not ported** — gap 3 |
+| stockers, sensors, redstone cards | **not ported** — gap 4 |
+| overclockers (more cards per side) | **not ported** — gap 5 |
+| menus/screens, wrench, particles, `_nbtclear` recipes, Patchouli | **not ported** — gaps 6–9 |
 
 ## Migration to the SDK format
 
@@ -340,6 +567,24 @@ Run in the port, `CARGO_INCREMENTAL=0`, each inside a `build-slot.sh run` lease 
   "card on the east side removed" as 0.1.0 did: the same state, an honest line.
 
 Skills: superpowers/using-superpowers,writing-plans,test-driven-development,systematic-debugging,verification-before-completion (this migration — the recipe is fixed, so no design choice was open and `brainstorming` did not apply; the 0.1.0 record below also lists `brainstorming`); BeautifulRust/rust-best-practices,rust-port
+
+## Review fixes (2026-11-18) — registry review #1208
+
+| Finding | Fix | Test / proof |
+|---|---|---|
+| `src/laser.rs:327` — the extract card committed the source extraction even when the destination refused and the source could not take the remainder back (an extraction-only slot such as a furnace output could lose items) | a move now takes no more than the destination reports room for (`runtime::movable` + `room_for`), puts the refused part back, and **aborts the network's transaction** when even that fails, so nothing of the tick moves instead of an item being lost | `runtime::tests::a_move_takes_no_more_than_the_destination_has_room_for` (watched failing); the e2e fills the destination and asserts the furnace output keeps its item |
+| `src/lib.rs:57` — the right-click hook fired for spectators and installed a card | `place_card_from_item` refuses a spectator and a player the game will not let use the card at that position (`may_install` + `mayUseItemAt`) | `laser::tests::{a_spectator_cannot_install_a_card, a_player_the_game_refuses_to_use_the_item_cannot_install_a_card}` |
+
+**Found while proving the leg:** the 8 s operation sample counted 10 changes on this box (the
+bound was 5–9); widened to 5–11 and the rate-4 sample to 3–8, still failing a per-tick or a
+stopped card. A new phase D3 primes a furnace output and a full chest: the ingot stays in the
+furnace, which the old extraction-first code lost. **Ladder:** 13 tests, clippy `-D warnings` 0,
+`fmt --check` clean, two builds byte-identical, `check` and `fits` exit 0;
+`launcher-game.sh run laserio` → `PASS` + `EXIT:0`, `GAME=$CONTROL_GAME` → `EXIT:1`
+(`../_shared/evidence/laserio-e2e/`).
+
+Package 0.2.1: **47,303 B**, SHA-256 `d6ecb42221cab8a18d8e714a4141a7c4b05c3a2507371a1f41f0e3628e628a16`;
+a second build is byte-identical (`cmp`), `check` and `fits` exit 0.
 
 ## Verification (0.1.0, the retired `.hnmod`)
 

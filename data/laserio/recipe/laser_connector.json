@@ -3,18 +3,10 @@
   "category": "misc",
   "group": "laserio",
   "key": {
-    "b": {
-      "item": "laserio:logic_chip"
-    },
-    "g": {
-      "tag": "c:glass_blocks"
-    },
-    "i": {
-      "tag": "c:ingots/iron"
-    },
-    "r": {
-      "tag": "c:dusts/redstone"
-    }
+    "b": "laserio:logic_chip",
+    "g": "#c:glass_blocks",
+    "i": "#c:ingots/iron",
+    "r": "#c:dusts/redstone"
   },
   "pattern": [
     " g ",

@@ -3,18 +3,10 @@
   "category": "misc",
   "group": "laserio",
   "key": {
-    "c": {
-      "item": "minecraft:clay_ball"
-    },
-    "g": {
-      "tag": "c:nuggets/gold"
-    },
-    "q": {
-      "item": "minecraft:quartz_block"
-    },
-    "r": {
-      "tag": "c:dusts/redstone"
-    }
+    "c": "minecraft:clay_ball",
+    "g": "#c:nuggets/gold",
+    "q": "minecraft:quartz_block",
+    "r": "#c:dusts/redstone"
   },
   "pattern": [
     "rgr",

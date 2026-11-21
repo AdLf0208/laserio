@@ -7,7 +7,7 @@
 #
 # Cargo's name and version are not the mod's identity: horizon-mod.toml is.
 name = "laserio"
-version = "0.2.0"
+version = "0.2.2"
 edition = "2024"
 license = "MIT"
 description = "LaserIO for Horizon: laser nodes and connectors moving items on a channel"

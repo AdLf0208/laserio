@@ -110,10 +110,10 @@ impl Hooks for Mod {
         laser::run_pass(host, event.level, queued);
     }
 
-    /// `/laserio info` is a readout; `card`/`remove`/`mode`/`rate`/`face` change a
-    /// node's automation and are operator-only (level 2): this pin has no node
-    /// screen, so they are a harness surface, not something every player may use
-    /// on any node.
+    /// `/laserio info` is a readout; `card`/`remove`/`mode`/`rate`/`channel`/`face`
+    /// change a node's automation and are operator-only (level 2): this pin has no
+    /// node screen, so they are a harness surface, not something every player may
+    /// use on any node.
     fn register_commands(&self, _host: &mut dyn ServerHost, event: &mut RegisterCommandsEvent<'_>) {
         event
             .commands
@@ -132,12 +132,16 @@ impl Hooks for Mod {
             "laserio rate <pos:block_pos> <side:word> <amount:integer>",
             2,
         ));
+        event.commands.push(Command::op(
+            "laserio channel <pos:block_pos> <side:word> <channel:integer>",
+            2,
+        ));
         event
             .commands
             .push(Command::op("laserio face <pos:block_pos> <side:word>", 2));
     }
 
-    /// Run the six usages [`Hooks::register_commands`] declares, after the game
+    /// Run the seven usages [`Hooks::register_commands`] declares, after the game
     /// has parsed and permission-checked them.
     fn run_mod_command(
         &self,
@@ -151,6 +155,7 @@ impl Hooks for Mod {
             ["laserio", "remove"] => laser::set_card_command(host, event.command, false),
             ["laserio", "mode"] => laser::set_mode_command(host, event.command),
             ["laserio", "rate"] => laser::set_rate_command(host, event.command),
+            ["laserio", "channel"] => laser::set_channel_command(host, event.command),
             ["laserio", "face"] => laser::set_face_command(host, event.command),
             _ => return Flow::Continue,
         }

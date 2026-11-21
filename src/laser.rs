@@ -20,15 +20,16 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use mod_api::{
-    BlockEntityPart, BlockEntityTickEvent, BlockEntityTicksEvent, BlockKey, BlockPart, Capability,
-    CommandArgumentValue, CommandInvocation, Compound, Direction, Hand, Host, HostTransaction,
-    ITEMS, ItemPlace, ItemResource, LevelRef, ResourceHandler, ServerHost, Tag, Text, Transaction,
+    BlockEntityPart, BlockEntityTickEvent, BlockEntityTicksEvent, BlockFace, BlockKey, BlockPart,
+    Capability, CommandArgumentValue, CommandInvocation, Compound, Direction, Hand, Host,
+    HostTransaction, ITEMS, ItemPlace, ItemResource, LevelRef, ResourceHandler, ServerHost, Tag,
+    Text, Transaction,
 };
 
 use crate::runtime::{
-    Card, Cards, Endpoint, FACE_COUNT, FACE_NAMES, Face, OPERATION_TICK_DELAY, Pos, TransferMode,
-    endpoint_order, face_named, face_normal, is_operation_tick, opposite, phase_of, spend_budget,
-    step,
+    Card, Cards, Destination, Endpoint, FACE_COUNT, FACE_NAMES, Face, OPERATION_TICK_DELAY, Pos,
+    Service, TransferMode, destination_order, face_named, face_normal, is_operation_tick, opposite,
+    phase_of, spend_budget, step,
 };
 
 /// The laser node block (and its item): the block that carries the cards.
@@ -228,32 +229,39 @@ fn connector_face(host: &dyn Host, level: LevelRef, pos: Pos) -> Option<Face> {
         .and_then(|value| face_named(&value))
 }
 
-/// The inventories a network can insert into: a node's INSERT cards and a
-/// connector's `facing` side, when that side reaches a container.
-fn endpoints(
+/// The inventories a network can insert into, and which cards each serves: a node's
+/// INSERT cards (serving their own channel) and a connector's `facing` side (a relay,
+/// serving every channel), when that side reaches a container.
+fn destinations(
     host: &mut dyn ServerHost,
     lasers: Lasers,
     level: LevelRef,
     network: &[Pos],
-) -> Vec<Endpoint> {
-    let mut endpoints = Vec::new();
+) -> Vec<Destination> {
+    let mut destinations = Vec::new();
     for &laser in network {
-        let faces: Vec<Face> = if is_block(host, lasers.connector, level, laser) {
-            connector_face(host, level, laser).into_iter().collect()
+        let faces: Vec<(Face, Service)> = if is_block(host, lasers.connector, level, laser) {
+            connector_face(host, level, laser)
+                .map(|face| (face, Service::AnyChannel))
+                .into_iter()
+                .collect()
         } else {
             cards_at(host, level, laser)
                 .cards()
                 .filter(|(_, card)| card.mode() == TransferMode::Insert)
-                .map(|(face, _)| face)
+                .map(|(face, card)| (face, Service::Channel(card.channel())))
                 .collect()
         };
-        for face in faces {
+        for (face, service) in faces {
             if has_container(host, level, step(laser, face), opposite(face)) {
-                endpoints.push(Endpoint { laser, face });
+                destinations.push(Destination {
+                    at: Endpoint { laser, face },
+                    service,
+                });
             }
         }
     }
-    endpoints
+    destinations
 }
 
 /// The first slot the source side offers that holds something: one item type per
@@ -285,7 +293,10 @@ struct Pass<'a> {
 /// destination (upstream extracts only what an inserter accepts).
 ///
 /// What a destination refuses is put back into the source in the same
-/// transaction, so a full target cannot lose an item.
+/// transaction, so a full target cannot lose an item. A move that cannot be put
+/// back at all (an extraction-only source, a destination whose capacity lied)
+/// returns false, and the caller aborts the transaction: the whole network's
+/// moves then roll back rather than any item being lost.
 fn run_card(
     host: &mut dyn ServerHost,
     tx: &Transaction,
@@ -293,25 +304,27 @@ fn run_card(
     laser: Pos,
     face: Face,
     card: Card,
-) {
+) -> bool {
     let Pass { lasers, level, .. } = pass;
     let from = step(laser, face);
     let from_face = opposite(face);
     let Some(source) = container(host, level, from, from_face) else {
-        return;
+        return true;
     };
     let Some((slot, resource)) = first_item(host, &source) else {
-        return;
+        return true;
     };
-    // The readout and the move agree on the destination set: the same endpoints,
-    // in the same order, the source never among them.
-    let all = endpoints(host, lasers, level, pass.network);
-    let order = endpoint_order(&all, Endpoint { laser, face });
+    // The readout and the move agree on the destination set: the same
+    // destinations, in the same order, the source never among them, and only the
+    // ones that serve this card's channel.
+    let all = destinations(host, lasers, level, pass.network);
+    let order = destination_order(&all, Endpoint { laser, face }, card.channel());
     if order.is_empty() {
-        return;
+        return true;
     }
+    let mut settled = true;
     spend_budget(card.amount(), &order, |index, remaining| {
-        let destination = all[index];
+        let destination = all[index].at;
         let to_pos = step(destination.laser, destination.face);
         let Some(target) = container(host, level, to_pos, opposite(destination.face)) else {
             return 0;
@@ -324,10 +337,18 @@ fn run_card(
         if put < took {
             // Give the refused part back: the slot it came from has room for it
             // again, and the whole move is inside one transaction.
-            let _ = source.insert_any(host, tx, &resource, took - put);
+            let missing = took - put;
+            let restored = source.insert_any(host, tx, &resource, missing);
+            if restored < missing {
+                // The source cannot take it back. Abort the network's transaction
+                // so nothing of this tick moved, instead of losing the remainder.
+                settled = false;
+                return 0;
+            }
         }
         put
     });
+    settled
 }
 
 /// Run every queued node's network at the end of the level's tick: each extract
@@ -358,7 +379,9 @@ pub(crate) fn run_pass(host: &mut dyn ServerHost, level: LevelRef, queued: BTree
             network: &network,
         };
         // One transaction per network per tick: the cards of one network move
-        // together, and a refused move never leaves an item in flight.
+        // together, and a refused move never leaves an item in flight. A card whose
+        // extraction cannot be undone aborts the transaction, so the whole network
+        // retries next tick instead of losing an item.
         let _ = host.transaction(|host, tx| {
             for &laser in &network {
                 if !is_block(host, lasers.node, level, laser) {
@@ -370,7 +393,9 @@ pub(crate) fn run_pass(host: &mut dyn ServerHost, level: LevelRef, queued: BTree
                     {
                         continue;
                     }
-                    run_card(host, tx, pass, laser, face, card);
+                    if !run_card(host, tx, pass, laser, face, card) {
+                        return Err(());
+                    }
                 }
             }
             Ok::<(), ()>(())
@@ -406,6 +431,27 @@ fn put_card(host: &mut dyn ServerHost, level: LevelRef, pos: Pos, face: Face) ->
     set_cards(host, level, pos, current.with(face, Some(Card::new()))).then_some(true)
 }
 
+/// Whether a right-click may install a card at the clicked block: a spectator may
+/// not (the hook still fires for them at this pin), and neither may a player the
+/// game refuses to use the held item at that position (adventure without a matching
+/// `can_place_on`).
+fn may_install(spectator: bool, may_use: Option<bool>) -> bool {
+    !spectator && may_use != Some(false)
+}
+
+/// The `BlockFace` a click normal names, for the host's own use check.
+fn block_face(normal: [i32; 3]) -> Option<BlockFace> {
+    Some(match normal {
+        [0, -1, 0] => BlockFace::Down,
+        [0, 1, 0] => BlockFace::Up,
+        [0, 0, -1] => BlockFace::North,
+        [0, 0, 1] => BlockFace::South,
+        [-1, 0, 0] => BlockFace::West,
+        [1, 0, 0] => BlockFace::East,
+        _ => return None,
+    })
+}
+
 /// Right-clicking a node with an item card places it on the clicked side, as
 /// upstream's `LaserNode.useWithoutItem` does; the item is consumed outside
 /// creative. A side that already carries a card is left for the (unported) menu.
@@ -421,6 +467,17 @@ pub(crate) fn place_card_from_item(
         return Placement::NotMine;
     };
     if held.item().id(host) != CARD {
+        return Placement::NotMine;
+    }
+    // A spectator's click is still delivered to this hook at this pin; installing a
+    // card for them would be a write no game mode allows.
+    let Some(player_ref) = host.player(player) else {
+        return Placement::NotMine;
+    };
+    let spectator = player_ref.is_spectator(&*host) == Some(true);
+    let may_use =
+        block_face(normal).and_then(|face| player_ref.may_use_item_at(&*host, pos, face, held));
+    if !may_install(spectator, may_use) {
         return Placement::NotMine;
     }
     let Some(level) = acting_level(host) else {
@@ -482,15 +539,21 @@ fn card_list(cards: Cards) -> String {
     names.join("; ")
 }
 
-/// The inventories a network reaches, as `2,100,0 east`.
-fn target_list(endpoints: &[Endpoint]) -> String {
-    let names: Vec<String> = endpoints
+/// The inventories a network reaches, as `2,100,0 east` for a connector's relay or
+/// `2,100,0 east channel 3` for a node's insert card.
+fn target_list(destinations: &[Destination]) -> String {
+    let names: Vec<String> = destinations
         .iter()
-        .map(|endpoint| {
-            format!(
+        .map(|destination| {
+            let endpoint = destination.at;
+            let mut name = format!(
                 "{},{},{} {}",
                 endpoint.laser[0], endpoint.laser[1], endpoint.laser[2], FACE_NAMES[endpoint.face]
-            )
+            );
+            if let Some(channel) = destination.service.channel() {
+                name.push_str(&format!(" channel {channel}"));
+            }
+            name
         })
         .collect();
     if names.is_empty() {
@@ -566,7 +629,7 @@ pub(crate) fn info(host: &mut dyn ServerHost, command: &CommandInvocation) {
             }
         ),
     );
-    let targets = target_list(&endpoints(host, lasers, level, &network));
+    let targets = target_list(&destinations(host, lasers, level, &network));
     feedback(
         host,
         &format!(
@@ -716,6 +779,41 @@ pub(crate) fn set_rate_command(host: &mut dyn ServerHost, command: &CommandInvoc
     );
 }
 
+/// `/laserio channel <pos> <side> <channel>`: which cards this one routes to. An
+/// extract card reaches the network's insert cards on the same channel; a
+/// connector relays for every channel.
+pub(crate) fn set_channel_command(host: &mut dyn ServerHost, command: &CommandInvocation) {
+    let Some(level) = acting_level(host) else {
+        feedback(host, "LaserIO: no level to write.");
+        return;
+    };
+    let Some((pos, face)) = command_target(
+        host,
+        command,
+        "Usage: /laserio channel <x> <y> <z> <side> <channel>",
+    ) else {
+        return;
+    };
+    let Some(channel) = command_integer(command, "channel") else {
+        feedback(host, "The channel must be a whole number.");
+        return;
+    };
+    if !edit_card(host, level, pos, face, |card| card.with_channel(channel)) {
+        feedback(host, "LaserIO: no card on that side.");
+        return;
+    }
+    let shown = cards_at(host, level, pos)
+        .get(face)
+        .map_or(0, |card| card.channel());
+    feedback(
+        host,
+        &format!(
+            "LaserIO: the {} side is on channel {shown}",
+            FACE_NAMES[face]
+        ),
+    );
+}
+
 /// `/laserio face <pos> <side>`: point a connector at one side.
 pub(crate) fn set_face_command(host: &mut dyn ServerHost, command: &CommandInvocation) {
     let Some(level) = acting_level(host) else {
@@ -824,4 +922,32 @@ pub(crate) fn taken_face_line(face: Face) -> String {
         "LaserIO: this side already has a card ({})",
         FACE_NAMES[face]
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_spectator_cannot_install_a_card() {
+        assert!(!may_install(true, Some(true)));
+        assert!(!may_install(true, None));
+    }
+
+    #[test]
+    fn a_player_the_game_refuses_to_use_the_item_cannot_install_a_card() {
+        assert!(!may_install(false, Some(false)));
+        assert!(may_install(false, Some(true)));
+        assert!(
+            may_install(false, None),
+            "an unanswered check keeps the old path"
+        );
+    }
+
+    #[test]
+    fn a_click_normal_names_the_face_the_host_checks() {
+        assert_eq!(block_face([0, 1, 0]), Some(BlockFace::Up));
+        assert_eq!(block_face([0, 0, -1]), Some(BlockFace::North));
+        assert_eq!(block_face([2, 0, 0]), None);
+    }
 }
